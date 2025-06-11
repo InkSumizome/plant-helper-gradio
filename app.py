@@ -6,28 +6,26 @@ import tensorflow as tf
 from openai import OpenAI
 from io import BytesIO
 import base64
-from datetime import datetime
 from huggingface_hub import hf_hub_download
+import gdown
 
+# --- 模型下載與載入 ---
 MODEL_PATH = "model.h5"
 if not os.path.exists(MODEL_PATH):
     print("模型不存在，開始下載…")
-    import gdown
     url = "https://drive.google.com/uc?export=download&id=1UMEwZPIRXZufay438TXjsHbkftiXHFLQ"
     gdown.download(url, MODEL_PATH, quiet=False)
 else:
     print("本地已存在模型，跳過下載。")
 
-# －－－ 讀取環境變數 －－－
-# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-GROQ_API_KEY   = os.getenv("GROQ_API_KEY")  # 如果你用 Groq 的話
-os.environ['OPENAI_API_KEY'] = GROQ_API_KEY
+model_cnn = tf.keras.models.load_model(MODEL_PATH, compile=False)
 
-# －－－ 載入模型與初始化 OpenAI 客戶端 －－－
-model_cnn = tf.keras.models.load_model("model.h5")
+# --- OpenAI (或 Groq) 客戶端 ---
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+os.environ["OPENAI_API_KEY"] = GROQ_API_KEY
 client = OpenAI(base_url="https://api.groq.com/openai/v1")
 
-# －－－ 類別名稱對照表 －－－
+# --- 分類標籤表 (英文/中文) ---
 english_names = [
     "African Violet (Saintpaulia ionantha)", "Aloe Vera", "Anthurium (Anthurium andraeanum)",
     "Areca Palm (Dypsis lutescens)", "Asparagus Fern (Asparagus setaceus)", "Begonia (Begonia spp.)",
@@ -67,13 +65,13 @@ chinese_labels = [
     '金錢樹(美鐵芋、金幣樹、雪鐵芋、澤米葉天南星、扎米蓮)'
 ]
 
-# －－－ 輔助：PIL 圖片轉 Base64（用於 HTML <img>）－－－
+# --- 輔助函式: 圖片轉 Base64 for HTML ---
 def image_to_base64(img: Image.Image) -> str:
     buffered = BytesIO()
     img.save(buffered, format="PNG")
     return "data:image/png;base64," + base64.b64encode(buffered.getvalue()).decode()
 
-# －－－ 輔助：決定使用哪個植物名 －－－
+# --- 輔助函式: 從問題抽植物名稱 ---
 def extract_or_use_last_plant(user_question: str, default_plant: str) -> str:
     system_prompt = f"""以下是使用者的問題：「{user_question}」
 請你判斷這句話中是否有提到植物名稱。
@@ -88,104 +86,98 @@ def extract_or_use_last_plant(user_question: str, default_plant: str) -> str:
     ).choices[0].message.content.strip()
     return default_plant if resp == "無" else resp
 
-# －－－ 主流程：預測 + Chat 回答 －－－
+# --- 主流程函式 ---
 last_plant = None
-
-def predict_and_chat(image: Image.Image, question: str):
+def predict_and_chat(camera_img, upload_img, question: str):
     global last_plant
-    html = ""
-    if image is not None:
-        # 1. 圖像預處理 + CNN 預測
-        img = image.convert("RGB")
-        img_resized = img.resize((224,224))
-        arr = np.expand_dims(np.array(img_resized)/255.0, axis=0)
-        preds = model_cnn.predict(arr)[0]
-        top5 = preds.argsort()[-5:][::-1]
+    # 確定用哪張圖片
+    image = camera_img or upload_img
+    if image is None:
+        return "<p style='color:red;'>請先拍照或上傳一張植物圖片！</p>"
 
-        # 2. 建立 Top‑5 表格
-        rows = ""
-        for idx in top5:
-            rows += f"<tr><td>{english_names[idx]}<br><b>{chinese_labels[idx]}</b></td><td>{preds[idx]:.2%}</td></tr>"
-        top1_idx = top5[0]
-        top1_chi = chinese_labels[top1_idx]
-        top1_prob = preds[top1_idx]
-        last_plant = top1_chi
+    # 確保是 PIL Image
+    if isinstance(image, np.ndarray):
+        image = Image.fromarray((image * 255).astype("uint8"))
+    img = image.convert("RGB")
+    img_resized = img.resize((224, 224))
+    arr = np.expand_dims(np.array(img_resized) / 255.0, axis=0)
+    preds = model_cnn.predict(arr)[0]
+    top5 = preds.argsort()[-5:][::-1]
 
-        html += f"""
-        <div style='display:flex;gap:20px;align-items:flex-start'>
-          <div>
-            <h3>🖼️ 圖片預覽</h3>
-            <img src="{image_to_base64(img)}" width="200" style="border-radius:12px;"/>
-          </div>
-          <div>
-            <h3>🌿 Top‑5 分類結果</h3>
-            <table border="1" style="border-collapse:collapse;text-align:center">
-              <tr><th>英文 / 中文</th><th>準確度</th></tr>
-              {rows}
-            </table>
-          </div>
-        </div>"""
-        
-        # 3. 生成植物介紹
-        intro_prefix = ""
-        if top1_prob < 0.6:
-            intro_prefix = "雖然信心不高，但這張圖可能是：\n"
-        prompt_intro = f"請用簡單介紹植物「{top1_chi}」，包含外觀、習性、常見用途、照顧方式（澆水頻率、光照需求）。"
-        intro_resp = client.chat.completions.create(
+    # 建 Top‑5 表格 HTML
+    rows = ""
+    for idx in top5:
+        rows += f"<tr><td>{english_names[idx]}<br><b>{chinese_labels[idx]}</b></td><td>{preds[idx]:.2%}</td></tr>"
+    top1_idx = top5[0]
+    top1_chi = chinese_labels[top1_idx]
+    top1_prob = preds[top1_idx]
+    last_plant = top1_chi
+
+    html = f"""
+    <div style='display:flex;gap:20px;align-items:flex-start'>
+      <div>
+        <h3>🖼️ 圖片預覽</h3>
+        <img src="{image_to_base64(img)}" width="200" style="border-radius:12px;"/>
+      </div>
+      <div>
+        <h3>🌿 Top‑5 分類結果</h3>
+        <table border="1" style="border-collapse:collapse;text-align:center">
+          <tr><th>英文 / 中文</th><th>準確度</th></tr>
+          {rows}
+        </table>
+      </div>
+    </div>"""
+
+    # AI 生成植物簡介
+    intro_prefix = "雖然信心不高，但這張圖可能是：\n" if top1_prob < 0.6 else ""
+    prompt_intro = f"請用簡單介紹植物「{top1_chi}」，包含外觀、習性、常見用途、照顧方式（澆水頻率、光照需求）。"
+    intro_resp = client.chat.completions.create(
+        model="gpt-3.5-turbo",
+        messages=[
+            {"role":"system","content":"你是一位專業植物小幫手，使用繁體中文回答。"},
+            {"role":"user","content":prompt_intro}
+        ]
+    ).choices[0].message.content
+
+    html += f"""
+    <div style='padding:10px;border:2px solid #90EE90;border-radius:12px;margin-top:10px'>
+      <h3>📘 AI 植物簡介：{top1_chi}</h3>
+      <div>{intro_prefix}{intro_resp.replace(chr(10),'<br>')}</div>
+    </div>"""
+
+    # 處理追問
+    if question:
+        plant_used = extract_or_use_last_plant(question, top1_chi)
+        prompt_q = f"使用者問：「{question}」，植物是「{plant_used}」，請回答。"
+        qa_resp = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role":"system","content":"你是一位專業植物小幫手，使用繁體中文回答。"},
-                {"role":"user","content":prompt_intro}
+                {"role":"user","content":prompt_q}
             ]
         ).choices[0].message.content
-
         html += f"""
-        <div style='padding:10px;border:2px solid #90EE90;border-radius:12px;margin-top:10px'>
-          <h3>📘 AI 植物簡介：{top1_chi}</h3>
-          <div>{intro_prefix}{intro_resp.replace(chr(10),'<br>')}</div>
+        <div style='padding:10px;border:2px solid #228B22;border-radius:12px;margin-top:10px'>
+          <h3>🗨️ 你的問題：{question}</h3>
+          <div>{qa_resp.replace(chr(10),'<br>')}</div>
         </div>"""
-
-        # 4. 若有追問，再做一次 Chat
-        if question:
-            plant_used = extract_or_use_last_plant(question, top1_chi)
-            prompt_q = f"使用者問：「{question}」，植物是「{plant_used}」，請回答。"
-            qa_resp = client.chat.completions.create(
-                model="gpt-3.5-turbo",
-                messages=[
-                    {"role":"system","content":"你是一位專業植物小幫手，使用繁體中文回答。"},
-                    {"role":"user","content":prompt_q}
-                ]
-            ).choices[0].message.content
-            html += f"""
-            <div style='padding:10px;border:2px solid #228B22;border-radius:12px;margin-top:10px'>
-              <h3>🗨️ 你的問題：{question}</h3>
-              <div>{qa_resp.replace(chr(10),'<br>')}</div>
-            </div>"""
-
-    else:
-        html = "<p style='color:red;'>請先用相機拍照或上傳一張植物圖片。</p>"
 
     return html
 
-# －－－ 建立 Gradio 介面 －－－
-image_input = gr.Image(
-    label="拍照或選圖",
-    type="numpy"
-)
-text_input = gr.Textbox(
-    label="詢問問題（可留空）",
-    placeholder="例如：這盆蘆薈要怎麼澆水？"
-)
-output = gr.HTML()
-
+# --- 建立 Gradio 介面 ---
 with gr.Blocks() as demo:
     gr.Markdown("## 🌿 植物小幫手")
     with gr.Row():
-        img = gr.Image(label="拍照或選圖", type="numpy")
-        txt = gr.Textbox(label="詢問問題（可留空）", placeholder="例如：這盆蘆葦要怎麼澆水？")
+        camera_input = gr.Camera(label="📷 拍照", type="pil")
+        upload_input = gr.Image(label="📁 上傳圖片", type="pil")
+    text_input = gr.Textbox(label="詢問問題（可留空）", placeholder="例如：這盆蘆葦要怎麼澆水？")
     btn = gr.Button("開始分析")
-    output = gr.HTML()   # ← 一定要放在這裡，才能顯示在同一頁面
+    output = gr.HTML()
 
-    btn.click(fn=predict_and_chat, inputs=[img, txt], outputs=output)
+    btn.click(
+        fn=predict_and_chat,
+        inputs=[camera_input, upload_input, text_input],
+        outputs=output
+    )
 
 demo.launch()
