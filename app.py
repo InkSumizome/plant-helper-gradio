@@ -7,8 +7,9 @@ from openai import OpenAI
 from io import BytesIO
 import base64
 from datetime import datetime
+from huggingface_hub import hf_hub_download
 
-MODEL_PATH = "model.keras"
+MODEL_PATH = "model.h5"
 if not os.path.exists(MODEL_PATH):
     print("模型不存在，開始下載…")
     import gdown
@@ -18,12 +19,12 @@ else:
     print("本地已存在模型，跳過下載。")
 
 # －－－ 讀取環境變數 －－－
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+# OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY")  # 如果你用 Groq 的話
-os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
+os.environ['OPENAI_API_KEY'] = GROQ_API_KEY
 
 # －－－ 載入模型與初始化 OpenAI 客戶端 －－－
-model_cnn = tf.keras.models.load_model("model.keras")
+model_cnn = tf.keras.models.load_model("model.h5")
 client = OpenAI(base_url="https://api.groq.com/openai/v1")
 
 # －－－ 類別名稱對照表 －－－
@@ -169,8 +170,7 @@ def predict_and_chat(image: Image.Image, question: str):
 # －－－ 建立 Gradio 介面 －－－
 image_input = gr.Image(
     label="拍照或選圖",
-    source=["webcam","upload"],
-    type="pil"
+    type="numpy"
 )
 text_input = gr.Textbox(
     label="詢問問題（可留空）",
