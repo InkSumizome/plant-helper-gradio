@@ -181,8 +181,11 @@ output = gr.HTML()
 with gr.Blocks() as demo:
     gr.Markdown("## 🌿 植物小幫手")
     with gr.Row():
-        img = image_input
-        txt = text_input
+        img = gr.Image(label="拍照或選圖", type="numpy")
+        txt = gr.Textbox(label="詢問問題（可留空）", placeholder="例如：這盆蘆葦要怎麼澆水？")
     btn = gr.Button("開始分析")
+    output = gr.HTML()   # ← 一定要放在這裡，才能顯示在同一頁面
+
     btn.click(fn=predict_and_chat, inputs=[img, txt], outputs=output)
-    demo.launch()
+
+demo.launch()
