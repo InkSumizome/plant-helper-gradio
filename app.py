@@ -168,7 +168,7 @@ def predict_and_chat(camera_img, upload_img, question: str):
 with gr.Blocks() as demo:
     gr.Markdown("## 🌿 植物小幫手")
     with gr.Row():
-        camera_input = gr.components.Camera(label="📷 拍照", type="pil")
+        camera_input = gr.inputs.Camera(label="📷 拍照", type="pil")
         upload_input = gr.Image(label="📁 上傳圖片", type="pil")
     text_input = gr.Textbox(label="詢問問題（可留空）", placeholder="例如：這盆蘆葦要怎麼澆水？")
     btn = gr.Button("開始分析")
