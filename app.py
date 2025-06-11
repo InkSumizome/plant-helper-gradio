@@ -12,7 +12,7 @@ MODEL_PATH = "model.keras"
 if not os.path.exists(MODEL_PATH):
     print("模型不存在，開始下載…")
     import gdown
-    url = "https://drive.google.com/uc?export=download&id=你的_FILE_ID"
+    url = "https://drive.google.com/uc?export=download&id=1UMEwZPIRXZufay438TXjsHbkftiXHFLQ"
     gdown.download(url, MODEL_PATH, quiet=False)
 else:
     print("本地已存在模型，跳過下載。")
