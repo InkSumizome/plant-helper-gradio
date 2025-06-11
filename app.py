@@ -8,13 +8,22 @@ from io import BytesIO
 import base64
 from datetime import datetime
 
+MODEL_PATH = "model.keras"
+if not os.path.exists(MODEL_PATH):
+    print("模型不存在，開始下載…")
+    import gdown
+    url = "https://drive.google.com/uc?export=download&id=你的_FILE_ID"
+    gdown.download(url, MODEL_PATH, quiet=False)
+else:
+    print("本地已存在模型，跳過下載。")
+
 # －－－ 讀取環境變數 －－－
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GROQ_API_KEY   = os.getenv("GROQ_API_KEY")  # 如果你用 Groq 的話
 os.environ['OPENAI_API_KEY'] = OPENAI_API_KEY
 
 # －－－ 載入模型與初始化 OpenAI 客戶端 －－－
-model_cnn = tf.keras.models.load_model("model.h5")
+model_cnn = tf.keras.models.load_model("model.keras")
 client = OpenAI(base_url="https://api.groq.com/openai/v1")
 
 # －－－ 類別名稱對照表 －－－
